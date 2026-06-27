@@ -20,28 +20,28 @@ import { StreamableHttpTransport } from '../../server/transport/streamable-http.
 import { getServer } from '../../server/server.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-// Custom Rate Limiter (Fixed Window: 100 req per detik)
-const rateLimitMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const now = Date.now();
-    const windowMs = 1000; 
-    const max = 100; 
+// Custom Rate Limiter dibungkus dalam closure untuk menghindari SyntaxError Babel
+const createRateLimiter = () => {
+    let windowStart = 0;
+    let requestCount = 0;
+    const windowMs = 1000;
+    const max = 100;
 
-    if (!rateLimitMiddleware.windowStart || (now - rateLimitMiddleware.windowStart > windowMs)) {
-        rateLimitMiddleware.windowStart = now;
-        rateLimitMiddleware.requestCount = 0;
-    }
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+        const now = Date.now();
+        if (!windowStart || (now - windowStart > windowMs)) {
+            windowStart = now;
+            requestCount = 0;
+        }
 
-    if (rateLimitMiddleware.requestCount >= max) {
-        return res.status(429).json({ error: 'Too Many Requests' });
-    }
+        if (requestCount >= max) {
+            return res.status(429).json({ error: 'Too Many Requests' });
+        }
 
-    rateLimitMiddleware.requestCount++;
-    next();
+        requestCount++;
+        next();
+    };
 };
-// @ts-ignore
-rateLimitMiddleware.windowStart = 0;
-// @ts-ignore
-rateLimitMiddleware.requestCount = 0;
 
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
     let transport: StreamableHttpTransport;
@@ -49,7 +49,6 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
     let originalConsoleError: typeof console.error;
 
     beforeAll(() => {
-        // Intercept console.error untuk menghitung berapa kali getServer() dieksekusi
         originalConsoleError = console.error;
     });
 
@@ -108,7 +107,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         // Buat app Express manual dengan rate limiter, menggunakan handler yang SAMA PERSIS dengan kode asli
         const app = express();
         app.use(express.json());
-        app.use(rateLimitMiddleware); // <-- Memasang pertahanan Rate Limiter
+        app.use(createRateLimiter()); // <-- Memasang pertahanan Rate Limiter
         
         app.post('/mcp', async (req, res) => {
             try {
