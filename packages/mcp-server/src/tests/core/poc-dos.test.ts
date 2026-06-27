@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
-import { StreamableHttpTransport } from '../../../server/transport/streamable-http.js';
-import { getServer } from '../../../server/server.js';
+import { StreamableHttpTransport } from '../../server/transport/streamable-http.js';
+import { getServer } from '../../server/server.js';
 
 // Mock fetch sederhana tanpa casting yang memicu error TS
 let mintlifyCallCount = 0;
