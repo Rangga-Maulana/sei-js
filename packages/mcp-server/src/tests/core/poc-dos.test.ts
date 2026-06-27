@@ -1,17 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
-import http from 'node:http';
 
 // 1. Mock mintlify/search.ts untuk menghitung berapa kali getServer() memanggil inisialisasi
 let searchToolCallCount = 0;
 jest.mock('../../mintlify/search.js', () => ({
     createSeiJSDocsSearchTool: jest.fn(async () => {
         searchToolCallCount++;
-        // Simulasi delay jaringan agar efek concurrency dan memory buildup terlihat
+        // Simulasi delay jaringan agar efek concurrency dan memory buildup terasa
         await new Promise(resolve => setTimeout(resolve, 50));
     })
 }));
 
-// 2. Mock docs/server.ts agar tidak keluar jaringan
+// 2. Mock docs/index.ts agar tidak keluar jaringan
 jest.mock('../../docs/index.js', () => ({
     createDocsSearchTool: jest.fn(async () => {})
 }));
@@ -25,32 +24,27 @@ jest.mock('../../server/package-info.js', () => ({
     })
 }));
 
-// Import setelah mock di atas agar mock diterapkan
 import { StreamableHttpTransport } from '../../server/transport/streamable-http.js';
 
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
     let transport: StreamableHttpTransport;
-    let server: http.Server;
-    let port: number;
+    const targetPort = 8912; // Gunakan port statis agar tidak perlu akses properti private
 
     beforeAll(async () => {
-        // Inisialisasi transport streamable-http asli
-        transport = new StreamableHttpTransport(0, 'localhost', '/mcp', 'disabled');
+        // Inisialisasi transport streamable-http asli pada port 8912
+        transport = new StreamableHttpTransport(targetPort, 'localhost', '/mcp', 'disabled');
         
-        // start() akan menjalankan app.listen(0) yang memilih port acak bebas
+        // start() akan menjalankan app.listen(8912)
         await transport.start({} as any);
-        
-        // @ts-ignore - Akses private properti server untuk mendapatkan port asli
-        server = transport.server;
-        port = (server.address() as any).port;
     });
 
-    afterAll(() => {
-        server.close();
+    afterAll(async () => {
+        // Hentikan server setelah test selesai
+        await transport.stop();
     });
 
     it('should trigger getServer() and memory exhaustion on concurrent requests', async () => {
-        const targetUrl = `http://localhost:${port}/mcp`;
+        const targetUrl = `http://localhost:${targetPort}/mcp`;
         
         const payload = {
             jsonrpc: '2.0',
