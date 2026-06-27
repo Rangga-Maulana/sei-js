@@ -2,6 +2,16 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 
+// 1. Mock mintlify/search.ts untuk mencegah fetch keluar dan process.exit(1)
+let mockSearchToolCallCount = 0;
+jest.mock('../../mintlify/search.js', () => ({
+    createSeiJSDocsSearchTool: jest.fn(async () => {
+        mockSearchToolCallCount++;
+        // Simulasi delay jaringan agar efek memory buildup terlihat
+        await new Promise(resolve => setTimeout(resolve, 50));
+    })
+}));
+
 // Mock docs agar tidak keluar jaringan
 jest.mock('../../docs/index.js', () => ({
     createDocsSearchTool: jest.fn(async () => {})
@@ -46,23 +56,17 @@ const createRateLimiter = () => {
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
     let transport: StreamableHttpTransport;
     const targetPort = 8913;
-    let originalConsoleError: typeof console.error;
 
-    beforeAll(() => {
-        originalConsoleError = console.error;
-    });
+    beforeAll(() => {});
 
     afterAll(async () => {
-        console.error = originalConsoleError;
         if (transport) await transport.stop();
     });
 
     // TEST 1: Tanpa Rate Limiter (Bare-metal server)
     it('should trigger getServer() and memory exhaustion on concurrent requests', async () => {
-        let getServerCallCount = 0;
-        console.error = (...args: any[]) => {
-            if (args[0] === 'Supported networks:') getServerCallCount++;
-        };
+        // Reset counter sebelum test
+        mockSearchToolCallCount = 0;
 
         transport = new StreamableHttpTransport(targetPort, 'localhost', '/mcp', 'disabled');
         await transport.start({} as any);
@@ -90,19 +94,17 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
         console.log(`[Test 1 - No Limit] Memory after: ${memAfter.toFixed(2)} MB`);
-        console.log(`[Test 1 - No Limit] getServer() triggered: ${getServerCallCount} times`);
+        console.log(`[Test 1 - No Limit] getServer() triggered: ${mockSearchToolCallCount} times`);
         console.log(`[Test 1 - No Limit] Memory increased by: ${(memAfter - memBefore).toFixed(2)} MB\n`);
 
-        expect(getServerCallCount).toBe(attackCount);
+        expect(mockSearchToolCallCount).toBe(attackCount);
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 
     // TEST 2: Dengan Rate Limiter (Simulasi API Gateway 100 req/s)
     it('should still cause memory exhaustion even with a rate limiter (100 req/s)', async () => {
-        let getServerCallCount = 0;
-        console.error = (...args: any[]) => {
-            if (args[0] === 'Supported networks:') getServerCallCount++;
-        };
+        // Reset counter sebelum test
+        mockSearchToolCallCount = 0;
 
         const app = express();
         app.use(express.json());
@@ -144,15 +146,14 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
         console.log(`[Test 2 - With Rate Limit] Memory after: ${memAfter.toFixed(2)} MB`);
-        console.log(`[Test 2 - With Rate Limit] getServer() triggered: ${getServerCallCount} times`);
+        console.log(`[Test 2 - With Rate Limit] getServer() triggered: ${mockSearchToolCallCount} times`);
         console.log(`[Test 2 - With Rate Limit] Memory increased by: ${(memAfter - memBefore).toFixed(2)} MB\n`);
 
         server.close();
 
-        // PERBAIKAN ASSERTION: 
         // Meskipun rate limiter memblokir sebagian besar request (hanya ~300 yang lolos dari 1500),
         // request yang LOLOS tetap memicu getServer() dan menyebabkan pembengkakan memory.
-        expect(getServerCallCount).toBeGreaterThan(0);
+        expect(mockSearchToolCallCount).toBeGreaterThan(0);
         
         // Memory tetap membengkak karena object McpServer yang dibuat oleh request yang lolos tidak bisa dibersihkan oleh GC.
         expect(memAfter).toBeGreaterThan(memBefore);
