@@ -20,14 +20,14 @@ import { StreamableHttpTransport } from '../../server/transport/streamable-http.
 import { getServer } from '../../server/server.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-// Custom Rate Limiter dibungkus dalam closure untuk menghindari SyntaxError Babel
+// Custom Rate Limiter tanpa type annotation agar tidak crash di Babel
 const createRateLimiter = () => {
     let windowStart = 0;
     let requestCount = 0;
     const windowMs = 1000;
     const max = 100;
 
-    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    return (req: any, res: any, next: any) => {
         const now = Date.now();
         if (!windowStart || (now - windowStart > windowMs)) {
             windowStart = now;
@@ -109,7 +109,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         app.use(express.json());
         app.use(createRateLimiter()); // <-- Memasang pertahanan Rate Limiter
         
-        app.post('/mcp', async (req, res) => {
+        app.post('/mcp', async (req: any, res: any) => {
             try {
                 // Ini adalah kode rentan dari streamable-http.ts baris 45
                 const mcpServer = await getServer();
