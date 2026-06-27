@@ -130,7 +130,6 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         const memBefore = process.memoryUsage().heapUsed / 1024 / 1024;
         console.log(`\n[Test 2 - With Rate Limit] Memory before: ${memBefore.toFixed(2)} MB`);
 
-        // Kirim 1500 request dengan delay 10ms (100 req/detik) selama 15 detik tanpa henti
         const attackCount = 1500; 
         for (let i = 0; i < attackCount; i++) {
             fetch(targetUrl, {
@@ -141,7 +140,6 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
             await new Promise(resolve => setTimeout(resolve, 10)); 
         }
 
-        // Hanya beri jeda 100ms agar Promise microtask selesai, tidak kasih waktu GC
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
@@ -151,11 +149,12 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         server.close();
 
-        // Meskipun rate limiter memblokir sebagian besar request (hanya 300 yang lolos dari 1500),
+        // PERBAIKAN ASSERTION: 
+        // Meskipun rate limiter memblokir sebagian besar request (hanya ~300 yang lolos dari 1500),
         // request yang LOLOS tetap memicu getServer() dan menyebabkan pembengkakan memory.
         expect(getServerCallCount).toBeGreaterThan(0);
         
-        // Memory tetap membengkak (89.59 MB) karena 300 object McpServer tidak bisa dibersihkan oleh GC dengan cepat.
+        // Memory tetap membengkak karena object McpServer yang dibuat oleh request yang lolos tidak bisa dibersihkan oleh GC.
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 });
