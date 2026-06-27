@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 
-// 1. Mock mintlify/search.ts untuk mencegah fetch keluar dan process.exit(1)
+// 1. Mock mintlify/search.ts untuk mencegah fetch keluar dan menghitung jumlah eksekusi
 let mockSearchToolCallCount = 0;
 jest.mock('../../mintlify/search.js', () => ({
     createSeiJSDocsSearchTool: jest.fn(async () => {
@@ -151,11 +151,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         server.close();
 
-        // Meskipun rate limiter memblokir sebagian besar request (hanya ~300 yang lolos dari 1500),
-        // request yang LOLOS tetap memicu getServer() dan menyebabkan pembengkakan memory.
         expect(mockSearchToolCallCount).toBeGreaterThan(0);
-        
-        // Memory tetap membengkak karena object McpServer yang dibuat oleh request yang lolos tidak bisa dibersihkan oleh GC.
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 });
