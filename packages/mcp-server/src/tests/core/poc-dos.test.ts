@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
+
+// Mock modul package-info untuk mencegah crash __filename di Jest ESM
+jest.mock('../../server/package-info.js', () => ({
+    getPackageInfo: () => ({
+        name: 'sei-mcp-server',
+        version: '0.0.0',
+        description: 'Sei MCP Server'
+    })
+}));
+
 import { StreamableHttpTransport } from '../../server/transport/streamable-http.js';
 import { getServer } from '../../server/server.js';
 
