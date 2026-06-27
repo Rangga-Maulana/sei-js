@@ -1,22 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import http from 'node:http';
 
-// Mock modul external agar tidak benar-benar keluar jaringan, 
-// tapi tetap menghitung berapa kali init-nya dieksekusi (pemicu DoS)
+// 1. Mock mintlify/search.ts untuk menghitung berapa kali getServer() memanggil inisialisasi
 let searchToolCallCount = 0;
 jest.mock('../../mintlify/search.js', () => ({
     createSeiJSDocsSearchTool: jest.fn(async () => {
         searchToolCallCount++;
-        // Simulasi delay jaringan agar efek concurrency terasa
+        // Simulasi delay jaringan agar efek concurrency dan memory buildup terlihat
         await new Promise(resolve => setTimeout(resolve, 50));
     })
 }));
 
+// 2. Mock docs/server.ts agar tidak keluar jaringan
 jest.mock('../../docs/index.js', () => ({
     createDocsSearchTool: jest.fn(async () => {})
 }));
 
-// Mock package-info untuk mencegah crash __filename di Jest ESM
+// 3. Mock package-info.ts untuk mencegah crash __filename di Jest ESM
 jest.mock('../../server/package-info.js', () => ({
     getPackageInfo: () => ({
         name: 'sei-mcp-server',
@@ -25,6 +25,7 @@ jest.mock('../../server/package-info.js', () => ({
     })
 }));
 
+// Import setelah mock di atas agar mock diterapkan
 import { StreamableHttpTransport } from '../../server/transport/streamable-http.js';
 
 describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', () => {
@@ -33,10 +34,10 @@ describe('[POC] DoS via Stateful Re-instantiation on Stateless HTTP Transport', 
     let port: number;
 
     beforeAll(async () => {
-        // Inisialisasi transport asli tanpa mock
+        // Inisialisasi transport streamable-http asli
         transport = new StreamableHttpTransport(0, 'localhost', '/mcp', 'disabled');
         
-        // start() akan memanggil app.listen(0) yang memilih port acak bebas
+        // start() akan menjalankan app.listen(0) yang memilih port acak bebas
         await transport.start({} as any);
         
         // @ts-ignore - Akses private properti server untuk mendapatkan port asli
